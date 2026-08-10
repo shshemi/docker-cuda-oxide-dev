@@ -46,16 +46,30 @@ RUN update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-${LLVM
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo
 
-# Pinned Rust nightly (matches cuda-oxide's rust-toolchain.toml):
-# rust-src for cross-compiling std to NVPTX, rustc-dev for the codegen backend
+# Pinned Rust nightly, with the full component set from cuda-oxide's
+# rust-toolchain.toml: rust-src for cross-compiling std to NVPTX, rustc-dev for
+# the codegen backend. Installing all of them here means rustup doesn't stop to
+# fetch anything the first time you cd into a checkout.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} && \
-    ${CARGO_HOME}/bin/rustup component add rust-src rustc-dev llvm-tools rust-analyzer \
+    ${CARGO_HOME}/bin/rustup component add \
+    rust-src rustc-dev llvm-tools rust-analyzer clippy rustfmt \
     --toolchain ${RUST_TOOLCHAIN}
 
-ENV PATH="/usr/local/cargo/bin:/usr/local/cuda/bin:${PATH}" \
+ENV PATH="/usr/local/cargo/bin:/usr/local/cuda/bin:/root/.local/bin:${PATH}" \
     CUDA_TOOLKIT_PATH=/usr/local/cuda \
     CUDA_OXIDE_LLC=/usr/bin/llc-${LLVM_VERSION}
+
+# The cargo-oxide CLI, installed into /usr/local/cargo/bin so it is on PATH
+# outside a checkout too. Verbatim from the cuda-oxide README -- replace this
+# whole command when upstream changes it. Tracks main, so a rebuild can pick up
+# a different revision than the last one.
+RUN cargo +nightly-2026-04-03 install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide
+
+# Claude Code. The installer puts the launcher in $HOME/.local/bin, which for
+# this image means /root/.local/bin -- already on PATH above. Like cargo-oxide
+# this is unpinned: it installs whatever is current at build time.
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Key auth only, for root (the account RunPod logs you in as).
 RUN mkdir -p /etc/ssh/sshd_config.d && \

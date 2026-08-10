@@ -1,8 +1,9 @@
 # cuda-oxide dev container
 
 Development environment for [cuda-oxide](https://github.com/NVlabs/cuda-oxide):
-CUDA 12.9 (devel), LLVM/Clang 21, and Rust `nightly-2026-04-03` with
-`rust-src` + `rustc-dev`, matching the repo's `rust-toolchain.toml`.
+CUDA 12.9 (devel), LLVM/Clang 21, Rust `nightly-2026-04-03` with the full
+component set from the repo's `rust-toolchain.toml`, the `cargo-oxide` CLI, and
+Claude Code.
 
 Runs as a RunPod pod: `start.sh` brings up sshd and holds the container open.
 
@@ -55,12 +56,17 @@ cargo oxide run vecadd    # build + run an example on the GPU
 cargo oxide sanitize vecadd
 ```
 
-`cargo oxide` works as a workspace alias inside the repo. To install it
-globally instead:
+`cargo-oxide` is installed globally at build time, so `cargo oxide` works
+anywhere in the container, not just inside a checkout. It is built from
+upstream `main` at image build time rather than a pinned revision — rebuild the
+image to pick up newer upstream changes, and expect two builds of the same
+Dockerfile to differ if `main` moved in between.
 
-```sh
-cargo +nightly-2026-04-03 install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide
-```
+Claude Code is installed too, as `claude`. It ships unauthenticated: either run
+`claude` once and log in, or set `ANTHROPIC_API_KEY` as a pod environment
+variable in the RunPod template. Credentials land in `/root/.claude`, which is
+part of the container layer and does not survive a pod being recreated —
+symlink it into `/workspace` if you want it to persist.
 
 ## How the SSH setup works
 
