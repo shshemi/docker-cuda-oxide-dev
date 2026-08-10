@@ -1,29 +1,22 @@
 # Development container for cuda-oxide (https://github.com/NVlabs/cuda-oxide)
-#
-# Base: RunPod's official base image, itself built on
-# nvidia/cuda:12.9-cudnn-devel-ubuntu24.04 (nvcc, CUDA headers, cuda-gdb,
-# compute-sanitizer) plus the RunPod pod contract -- a /start.sh that installs
-# $PUBLIC_KEY into authorized_keys, generates host keys, starts sshd, dumps the
-# pod environment to /etc/rp_environment, and holds the container open with
-# `sleep infinity`.
-#
-# Deliberately no CMD below: the inherited CMD ["/start.sh"] is what keeps the
-# pod running and makes SSH work. Overriding it stops the container instantly
-# and SSH fails with "container is not running".
-FROM runpod/base:1.1.0-cuda1290-ubuntu2404
+# Base: CUDA devel image (nvcc, CUDA headers, cuda-gdb, compute-sanitizer)
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04
 
 ARG LLVM_VERSION=21
 ARG RUST_TOOLCHAIN=nightly-2026-04-03
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Tools the RunPod base doesn't ship: pkg-config for Rust build scripts,
-# lsb-release for apt.llvm.org's llvm.sh, less as a pager.
-# (build-essential, cmake, git, curl, wget, gpg, sudo, vim and openssh-server
-# all come from the base image.)
+# Base tooling. openssh-server is here for RunPod: both the ssh.runpod.io
+# proxy and a directly exposed TCP port terminate at an sshd inside this
+# container. The host keys the package generates at build time are deleted --
+# start.sh regenerates them per container, so pods don't share one identity.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    pkg-config lsb-release less && \
+    build-essential git curl wget ca-certificates pkg-config cmake \
+    lsb-release software-properties-common gnupg sudo vim-tiny less \
+    openssh-server python3 && \
+    rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -47,10 +40,9 @@ RUN update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-${LLVM
     update-alternatives --install /usr/bin/llc     llc     /usr/bin/llc-${LLVM_VERSION}     100 && \
     update-alternatives --install /usr/bin/opt     opt     /usr/bin/opt-${LLVM_VERSION}     100
 
-# Rust lives under /usr/local rather than /root/.cargo: sshd builds a fresh
-# environment for each session, so a toolchain hidden in a home directory is
-# easy to lose. /usr/local/cargo/bin is on PATH for PID 1, which RunPod's
-# start.sh then re-exports to every shell via /etc/rp_environment.
+# Rust lives under /usr/local rather than a home directory: sshd builds a fresh
+# environment per session, and /usr/local/cargo/bin on the PATH of PID 1 is
+# what start.sh snapshots into /etc/container_env.sh for SSH logins.
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo
 
@@ -61,10 +53,37 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     ${CARGO_HOME}/bin/rustup component add rust-src rustc-dev llvm-tools rust-analyzer \
     --toolchain ${RUST_TOOLCHAIN}
 
-ENV PATH="/usr/local/cargo/bin:${PATH}" \
+ENV PATH="/usr/local/cargo/bin:/usr/local/cuda/bin:${PATH}" \
     CUDA_TOOLKIT_PATH=/usr/local/cuda \
     CUDA_OXIDE_LLC=/usr/bin/llc-${LLVM_VERSION}
+
+# Key auth only, for root (the account RunPod logs you in as).
+RUN mkdir -p /etc/ssh/sshd_config.d && \
+    printf '%s\n' \
+    'PermitRootLogin prohibit-password' \
+    'PasswordAuthentication no' \
+    'ClientAliveInterval 60' \
+    > /etc/ssh/sshd_config.d/99-container.conf
+
+# Source the environment start.sh snapshots at boot. profile.d covers
+# interactive SSH logins; .bashrc covers `ssh <pod> <command>`, which is not a
+# login shell but does read .bashrc when bash is started by sshd.
+RUN printf '%s\n' '[ -f /etc/container_env.sh ] && . /etc/container_env.sh' \
+    | tee /etc/profile.d/10-container-env.sh >> /root/.bashrc
+
+# Fallback authorized key, used when RunPod doesn't inject $PUBLIC_KEY.
+RUN mkdir -p /root/.ssh && \
+    echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHRLJ4AqJNVc06km2X/g+pU9RAFeBYi+okJMgR8TfcmG shshemi@gmail.com' \
+    >> /root/.ssh/authorized_keys && \
+    chmod 700 /root/.ssh && \
+    chmod 600 /root/.ssh/authorized_keys
+
+COPY --chmod=755 start.sh /start.sh
 
 # On RunPod this is the network volume mount point, and the only path that
 # survives a pod restart -- keep checkouts here.
 WORKDIR /workspace
+
+EXPOSE 22
+
+CMD ["/start.sh"]
