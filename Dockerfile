@@ -1,9 +1,9 @@
-# Development container for cuda-oxide (https://github.com/NVlabs/cuda-oxide)
+# Development container for cuda-oxide (https://github.com/NVIDIA/cuda-rust)
 # Base: CUDA devel image (nvcc, CUDA headers, cuda-gdb, compute-sanitizer)
-FROM nvidia/cuda:12.9.1-devel-ubuntu24.04
+FROM nvidia/cuda:13.3.1-devel-ubuntu24.04
 
 ARG LLVM_VERSION=21
-ARG RUST_TOOLCHAIN=nightly-2026-04-03
+ARG RUST_TOOLCHAIN=nightly-2026-10-11
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -58,13 +58,15 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 
 ENV PATH="/usr/local/cargo/bin:/usr/local/cuda/bin:/root/.local/bin:${PATH}" \
     CUDA_TOOLKIT_PATH=/usr/local/cuda \
-    CUDA_OXIDE_LLC=/usr/bin/llc-${LLVM_VERSION}
+    CUDA_OXIDE_LLC=/usr/bin/llc-${LLVM_VERSION} \
+    LIBCLANG_PATH=/usr/lib/llvm-${LLVM_VERSION}/lib \
+    LLVM_CONFIG_PATH=/usr/bin/llvm-config-${LLVM_VERSION}
 
 # The cargo-oxide CLI, installed into /usr/local/cargo/bin so it is on PATH
 # outside a checkout too. Verbatim from the cuda-oxide README -- replace this
 # whole command when upstream changes it. Tracks main, so a rebuild can pick up
 # a different revision than the last one.
-RUN cargo +nightly-2026-04-03 install --git https://github.com/NVlabs/cuda-oxide.git cargo-oxide
+RUN cargo +nightly-2026-10-11 install --git https://github.com/NVIDIA/cuda-rust.git cargo-oxide
 
 # Claude Code. The installer puts the launcher in $HOME/.local/bin, which for
 # this image means /root/.local/bin -- already on PATH above. Like cargo-oxide
